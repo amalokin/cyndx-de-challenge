@@ -2,9 +2,12 @@ import csv
 import re
 import psycopg2
 import yaml
+import os
 
 
 def clean_phone_field(input_path, output_path):
+    """The function takes path for the company contacts dataset and the output dataset. It saves the output dataset
+     with the cleaned and formatted phone field."""
 
     with open(input_path, 'r') as source, open(output_path, 'w') as output:  # simultaneous reading and writing
 
@@ -45,16 +48,25 @@ def clean_phone_field(input_path, output_path):
 
 
 def upload_and_join(local_path, table_name="solution_Alex"):
+    """The function takes the path to the modified dataset and the name of the remote table to be created and joined
+    with the company table."""
 
     with open('config.yml', 'rb') as yaml_file:
         conf = yaml.safe_load(yaml_file)  # load the config file
-    print(type(conf))
-    conn = psycopg2.connect(**conf)  # connection parameters are saved on a local machine and put into .gitignore
+
+    try:
+        conn = psycopg2.connect(**conf)  # connection parameters are saved on a local machine and put into .gitignore
+    except psycopg2.Error as e:
+        print("Connection failed:")
+        print(e)
+        return
+
     cur = conn.cursor()
 
     with open(local_path, 'r') as f:
         head = f.readline().strip().split(",")
-        temp_table = "phone_cleaned"
+        temp_table = "phone_cleaned"  # name for the temporary table
+
         cur.execute(f"""
                     CREATE TABLE {temp_table} (
                     {head[0]} VARCHAR(256),
@@ -67,7 +79,7 @@ def upload_and_join(local_path, table_name="solution_Alex"):
         cur.copy_expert(f"""
                         COPY {temp_table} FROM STDIN WITH CSV DELIMITER ',' QUOTE '"';
                         """,
-                        f)
+                        f)  # bulk load from the local modified dataset into the temporary table
 
         cur.execute(f"""
                     ALTER TABLE {temp_table} ADD COLUMN domain VARCHAR(128);
@@ -84,22 +96,23 @@ def upload_and_join(local_path, table_name="solution_Alex"):
                     FROM {temp_table} AS t1, companies as c
                     WHERE t1.domain = c.domain
                     );
-                    """)  # Inner join implemented, could be modified to a full outer join (or left/right join)
+                    """)  # inner join implemented, could be modified to a full outer join (or left/right join)
 
         cur.execute(f"""
                     DROP TABLE IF EXISTS {temp_table};
-                    """)
+                    """)  # delete the temporary table
 
         conn.commit()
-    conn.close()
+        conn.close()
 
 
 if __name__ == "__main__":
     FOLDER_PATH = "../data/"
     OUTPUT_FILE = "company_contacts_phone_field_cleaned.csv"
 
-    clean_phone_field(input_path=FOLDER_PATH + "company_contacts.csv",
-                      output_path=FOLDER_PATH + OUTPUT_FILE)
+    if not os.path.exists(FOLDER_PATH + OUTPUT_FILE):
+        clean_phone_field(input_path=FOLDER_PATH + "company_contacts.csv",
+                          output_path=FOLDER_PATH + OUTPUT_FILE)
 
     upload_and_join(local_path=FOLDER_PATH + OUTPUT_FILE,
                     table_name="solution_Alex")
